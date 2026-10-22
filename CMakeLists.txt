@@ -21,3 +21,10 @@ if(MSVC)
 else()
     target_compile_options(better_bloom PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+# Current Apple linkers reject Dusklight's generated bundle-loader stub because it
+# does not contain an LC_UUID command. The classic linker accepts the stub and
+# produces a loadable macOS mod bundle.
+if(APPLE)
+    target_link_options(better_bloom PRIVATE -Wl,-ld_classic)
+endif()
