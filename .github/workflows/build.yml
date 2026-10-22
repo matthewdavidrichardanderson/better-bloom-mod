@@ -81,11 +81,15 @@ jobs:
         run: git -C host-sdk submodule update --init --depth 1 extern/aurora
 
       - name: Set up build tools
-        run: >-
-          python3 -m pip install --disable-pip-version-check --only-binary=:all:
-          cmake==3.31.10 ninja==1.13.0
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/better-bloom-tools"
+          "${RUNNER_TEMP}/better-bloom-tools/bin/python" -m pip install \
+            --disable-pip-version-check --only-binary=:all: \
+            cmake==3.31.10 ninja==1.13.0
 
       - name: Build and validate macOS package
+        env:
+          PYTHON_BIN: ${{ runner.temp }}/better-bloom-tools/bin/python
         run: ./.github/scripts/build-macos.sh "${{ github.workspace }}/host-sdk"
 
       - name: Upload macOS package
