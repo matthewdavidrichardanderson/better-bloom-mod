@@ -79,6 +79,12 @@ struct alignas(16) FrameUniforms {
     float highlightLimit = 0;
     float responseScale = static_cast<float>(defaultResponseScale);
     float padding = 0;
+    uint32_t brightnessMetric = 0;
+    float preDiffusionGain = 0;
+    float sourceLimit = 0;
+    uint32_t filteringSpace = 0;
+    std::array<float, 2> spread{1, 1};
+    std::array<uint32_t, 2> padding3{};
 };
 
 struct alignas(16) StepUniforms {
@@ -198,7 +204,7 @@ inline UniformBlock pack_uniforms(FrameUniforms frame, const Plan& plan) {
     return block;
 }
 
-static_assert(sizeof(FrameUniforms) == 96);
+static_assert(sizeof(FrameUniforms) == 128);
 static_assert(sizeof(StepUniforms) == 16);
 
 }

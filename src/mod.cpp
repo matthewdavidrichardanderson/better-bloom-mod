@@ -136,6 +136,11 @@ HookAction on_bloom(ModContext*, void* args, void*, void*) {
     uniforms.highlightColour = settings.highlightColour;
     uniforms.highlightRolloff = settings.highlightRolloff;
     uniforms.highlightLimit = settings.highlightLimit;
+    uniforms.brightnessMetric = settings.brightnessMetric;
+    uniforms.preDiffusionGain = settings.preDiffusionGain;
+    uniforms.sourceLimit = settings.sourceLimit;
+    uniforms.filteringSpace = settings.filteringSpace;
+    uniforms.spread = settings.spread;
     uniforms.mode = settings.blend == 0 ? current->mMode : settings.blend - 1;
     uniforms.enabled = enabled ? 1u : 0u;
     uniforms.sourceSrgb = bloom::is_srgb(scene.color_format) ? 1u : 0u;

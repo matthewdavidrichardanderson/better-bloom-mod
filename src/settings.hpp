@@ -30,6 +30,11 @@ struct Settings {
     float highlightColour = 0;
     float highlightRolloff = 1;
     float highlightLimit = 0;
+    uint32_t brightnessMetric = 0;
+    float preDiffusionGain = 0;
+    float sourceLimit = 0;
+    uint32_t filteringSpace = 0;
+    std::array<float, 2> spread{1, 1};
     std::array<float, 3> tint{1, 1, 1};
     uint32_t blend = 0;
     uint32_t divisor = 2;

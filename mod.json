@@ -1,7 +1,7 @@
 {
   "id": "dev.mdra5000.better_bloom",
   "name": "Better Bloom",
-  "version": "2.9.1",
+  "version": "2.10.0",
   "author": "mdra5000",
   "description": "Smooth, resolution-independent bloom with the game's changing colours and atmosphere."
 }

@@ -50,10 +50,18 @@ enum class Setting : size_t {
     AreaSource,
     Blend,
     Resolution,
+    BrightnessMetric,
+    PreDiffusionGain,
+    SourceLimit,
+    FilteringSpace,
+    HorizontalSpread,
+    VerticalSpread,
     Count
 };
 
-enum class Section { Bloom, Profile, Response, Colour, Pulse, BloomOverrides, Performance };
+enum class Section {
+    Bloom, Source, Profile, Response, Colour, Pulse, BloomOverrides, Performance
+};
 
 struct Group {
     Section section;
@@ -61,7 +69,8 @@ struct Group {
 };
 
 constexpr std::array groups{Group{Section::Bloom, "Bloom options"},
-    Group{Section::Profile, "Glow profile"}, Group{Section::Response, "Bloom response"},
+    Group{Section::Source, "Bloom source"}, Group{Section::Profile, "Glow profile"},
+    Group{Section::Response, "Bloom response"},
     Group{Section::Colour, "Colour"}, Group{Section::Pulse, "Pulse options"},
     Group{Section::BloomOverrides, "Overrides"}, Group{Section::Performance, "Performance"}};
 
@@ -138,7 +147,19 @@ std::array options{
         Section::BloomOverrides},
     Option{"blend", "Blend mode", UI_CONTROL_DROPDOWN, 0, 0, 2, nullptr, Section::BloomOverrides},
     Option{"resolution", "Processing resolution", UI_CONTROL_DROPDOWN, 1, 0, 2, nullptr,
-        Section::Performance}};
+        Section::Performance},
+    Option{"brightnessMetric", "Brightness metric", UI_CONTROL_DROPDOWN, 0, 0, 3, nullptr,
+        Section::Source},
+    Option{"preDiffusionGain", "Pre-diffusion gain", UI_CONTROL_NUMBER, 0, 0, 100, "%",
+        Section::Source},
+    Option{"sourceLimit", "Source highlight limit", UI_CONTROL_NUMBER, 0, 0, 4000, "%",
+        Section::Source},
+    Option{"filteringSpace", "Filtering space", UI_CONTROL_DROPDOWN, 0, 0, 1, nullptr,
+        Section::Profile},
+    Option{"horizontalSpread", "Horizontal spread", UI_CONTROL_NUMBER, 100, 25, 400, "%",
+        Section::Profile},
+    Option{"verticalSpread", "Vertical spread", UI_CONTROL_NUMBER, 100, 25, 400, "%",
+        Section::Profile}};
 
 static_assert(options.size() == static_cast<size_t>(Setting::Count));
 struct Preset {
@@ -148,7 +169,7 @@ struct Preset {
     const char* tint = "";
 };
 
-enum class PresetKind { Faithful, FaithfulCold, Modern, ModernCold, Hybrid, Haze };
+enum class PresetKind { Faithful, FaithfulCold, HD, Modern, ModernCold, Hybrid, Haze };
 
 auto preset_values(PresetKind kind) {
     std::array<double, static_cast<size_t>(Setting::Count)> result{};
@@ -214,6 +235,27 @@ auto preset_values(PresetKind kind) {
             set(Setting::HaloContribution, 8);
         }
     }
+    if (kind == PresetKind::HD) {
+        set(Setting::Intensity, 224.12109375);
+        set(Setting::Size, 100);
+        set(Setting::Softness, 0);
+        set(Setting::Diffusion, 0);
+        set(Setting::CoreContribution, 0);
+        set(Setting::InnerWidth, 454);
+        set(Setting::InnerContribution, 100);
+        set(Setting::OuterWidth, 100);
+        set(Setting::OuterContribution, 0);
+        set(Setting::HaloContribution, 0);
+        set(Setting::ResponseGain, 59.765625);
+        set(Setting::HighlightRolloff, 0);
+        set(Setting::HighlightColour, 100);
+        set(Setting::SceneDarkening, 100);
+        set(Setting::BrightnessMetric, 1);
+        set(Setting::PreDiffusionGain, 100);
+        set(Setting::SourceLimit, 100);
+        set(Setting::FilteringSpace, 1);
+        set(Setting::HorizontalSpread, 160);
+    }
     const float gain =
         static_cast<float>(result[static_cast<size_t>(Setting::ResponseGain)] / 100) *
         defaultResponseGain;
@@ -230,6 +272,7 @@ const std::array presets{Preset{1, "Faithful", preset_values(PresetKind::Faithfu
     Preset{3, "Modern", preset_values(PresetKind::Modern)},
     Preset{6, "Modern (Cold)", preset_values(PresetKind::ModernCold), "fff4e8"},
     Preset{4, "Hybrid", preset_values(PresetKind::Hybrid)},
+    Preset{8, "TPHD", preset_values(PresetKind::HD)},
     Preset{5, "Haze", preset_values(PresetKind::Haze)}};
 ConfigVarHandle lastPresetHandle = 0;
 int64_t lastPreset = 0;
@@ -325,6 +368,11 @@ void rebuild() {
             response_compensation(current.responseGain, current.highlightRolloff) :
             1;
     current.highlightLimit = percent(Setting::HighlightLimit);
+    current.brightnessMetric = static_cast<uint32_t>(value(Setting::BrightnessMetric));
+    current.preDiffusionGain = percent(Setting::PreDiffusionGain);
+    current.sourceLimit = percent(Setting::SourceLimit);
+    current.filteringSpace = static_cast<uint32_t>(value(Setting::FilteringSpace));
+    current.spread = {percent(Setting::HorizontalSpread), percent(Setting::VerticalSpread)};
     current.sceneStrength = percent(Setting::SceneStrength);
     current.sceneDarkening = percent(Setting::SceneDarkening);
     current.neutralTint = value(Setting::TintSource) != 0;
@@ -449,6 +497,9 @@ UiControlDesc describe_option(Setting setting) {
     static constexpr const char* activations[]{"Vanilla", "Everywhere"};
     static constexpr const char* blendModes[]{"Vanilla", "Additive", "Screen"};
     static constexpr const char* resolutions[]{"Full", "Half", "Quarter"};
+    static constexpr const char* brightness[]{
+        "Blue weighted", "Luma (Rec. 601)", "Luma (Rec. 709)", "Maximum channel"};
+    static constexpr const char* spaces[]{"Linear light", "Display encoded"};
     auto& option = options[static_cast<size_t>(setting)];
     UiControlDesc descriptor = UI_CONTROL_DESC_INIT;
     descriptor.kind = option.kind;
@@ -468,6 +519,14 @@ UiControlDesc describe_option(Setting setting) {
     descriptor.is_disabled = control_disabled;
     descriptor.user_data = reinterpret_cast<void*>(static_cast<uintptr_t>(setting));
     switch (setting) {
+    case Setting::BrightnessMetric:
+        descriptor.options = brightness;
+        descriptor.option_count = std::size(brightness);
+        break;
+    case Setting::FilteringSpace:
+        descriptor.options = spaces;
+        descriptor.option_count = std::size(spaces);
+        break;
     case Setting::ThresholdSource:
         descriptor.options = thresholds;
         descriptor.option_count = std::size(thresholds);
@@ -531,8 +590,8 @@ void set_preset(ModContext*, void*, const UiControlValue* input) {
 
 UiControlDesc describe_presets() {
     static const char* names[]{"Custom", presets[0].name, presets[1].name, presets[2].name,
-        presets[3].name, presets[4].name, presets[5].name};
-    static constexpr bool selectable[]{false, true, true, true, true, true, true};
+        presets[3].name, presets[4].name, presets[5].name, presets[6].name};
+    static constexpr bool selectable[]{false, true, true, true, true, true, true, true};
     UiControlDesc descriptor = UI_CONTROL_DESC_INIT;
     descriptor.kind = UI_CONTROL_DROPDOWN;
     descriptor.label = "Preset";

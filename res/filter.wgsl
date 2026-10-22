@@ -17,6 +17,12 @@ struct Frame {
     highlight_limit: f32,
     response_scale: f32,
     padding2: f32,
+    brightness_metric: u32,
+    pre_diffusion_gain: f32,
+    source_limit: f32,
+    filtering_space: u32,
+    spread: vec2f,
+    padding3: vec2u,
 }
 
 struct Step {
@@ -50,13 +56,28 @@ fn extract(uv: vec2f) -> vec3f {
     if frame.source_srgb != 0u {
         encoded = to_srgb(sampled);
     }
-    let brightness = dot(encoded, vec3f(0.25, 0.25, 0.5));
+    var brightness = dot(encoded, vec3f(0.25, 0.25, 0.5));
+    switch frame.brightness_metric {
+        case 1u: { brightness = dot(encoded, vec3f(0.299, 0.587, 0.114)); }
+        case 2u: { brightness = dot(encoded, vec3f(0.2126, 0.7152, 0.0722)); }
+        case 3u: { brightness = max(encoded.r, max(encoded.g, encoded.b)); }
+        default: {}
+    }
     let knee = max(frame.knee, 0.00001);
     let shoulder = clamp(brightness - frame.threshold + knee, 0.0, 2.0 * knee);
     let contribution = min(brightness,
         max(brightness - frame.threshold, shoulder * shoulder / (4.0 * knee)));
-    let extracted = encoded * max(contribution, 0.0);
-    return to_linear(extracted);
+    var extracted = encoded * max(contribution, 0.0);
+    if frame.pre_diffusion_gain > 0.0 {
+        extracted *= pow(max(frame.gain * frame.response_gain, 0.0), frame.pre_diffusion_gain);
+    }
+    if frame.source_limit > 0.0 {
+        extracted = min(extracted, vec3f(frame.source_limit));
+    }
+    if frame.filtering_space == 1u {
+        return extracted;
+    }
+    return min(to_linear(extracted), vec3f(65504));
 }
 
 fn sample_high(uv: vec2f, prefilter: bool) -> vec3f {
@@ -67,7 +88,10 @@ fn sample_high(uv: vec2f, prefilter: bool) -> vec3f {
 }
 
 fn reduce(uv: vec2f, prefilter: bool) -> vec3f {
-    let texel = 1.0 / vec2f(textureDimensions(high));
+    var texel = 1.0 / vec2f(textureDimensions(high));
+    if !prefilter {
+        texel *= frame.spread;
+    }
     var result = sample_high(uv, prefilter) * 0.125;
     result += (sample_high(uv + texel * vec2f(-2, -2), prefilter)
         + sample_high(uv + texel * vec2f(2, -2), prefilter)
@@ -149,8 +173,12 @@ fn reconstruct(uv: vec2f) -> vec3f {
     let fraction = fract(position);
     let lower_weight = 0.75 - 0.5 * fraction;
     let upper_weight = 1.0 - lower_weight;
-    let lower = (floor(position) - 0.5 + (0.5 - 0.25 * fraction) / lower_weight) / size;
-    let upper = (floor(position) + 1.5 + 0.25 * fraction / upper_weight) / size;
+    var lower = (floor(position) - 0.5 + (0.5 - 0.25 * fraction) / lower_weight) / size;
+    var upper = (floor(position) + 1.5 + 0.25 * fraction / upper_weight) / size;
+    if any(frame.spread != vec2f(1)) {
+        lower = uv + (lower - uv) * frame.spread;
+        upper = uv + (upper - uv) * frame.spread;
+    }
     return textureSampleLevel(low, linear_sampler, lower, 0.0).rgb
             * lower_weight.x * lower_weight.y
         + textureSampleLevel(low, linear_sampler, vec2f(upper.x, lower.y), 0.0).rgb

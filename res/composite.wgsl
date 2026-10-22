@@ -17,6 +17,12 @@ struct Frame {
     highlight_limit: f32,
     response_scale: f32,
     padding2: f32,
+    brightness_metric: u32,
+    pre_diffusion_gain: f32,
+    source_limit: f32,
+    filtering_space: u32,
+    spread: vec2f,
+    padding3: vec2u,
 }
 
 @group(0) @binding(0) var scene: texture_2d<f32>;
@@ -68,8 +74,18 @@ fn fragment(input: Vertex) -> @location(0) vec4f {
     var glow = vec3f(0);
     var colour = graded;
     if frame.enabled != 0u {
-        let accumulated = to_srgb(textureSampleLevel(bloom, linear_sampler, input.uv, 0.0).rgb);
-        let amplified = max(accumulated * frame.gain * frame.response_gain, vec3f(0));
+        var accumulated = textureSampleLevel(bloom, linear_sampler, input.uv, 0.0).rgb;
+        if frame.filtering_space == 0u {
+            accumulated = to_srgb(accumulated);
+        }
+        var amplified = max(accumulated * frame.gain * frame.response_gain, vec3f(0));
+        if frame.pre_diffusion_gain > 0.0 {
+            var remaining_gain = 1.0;
+            if frame.pre_diffusion_gain < 1.0 {
+                remaining_gain = pow(max(frame.gain * frame.response_gain, 0.0), 1.0 - frame.pre_diffusion_gain);
+            }
+            amplified = max(accumulated * remaining_gain, vec3f(0));
+        }
         let peak = max(amplified.r, max(amplified.g, amplified.b));
         var response: vec3f;
         if frame.highlight_colour >= 1.0 {
