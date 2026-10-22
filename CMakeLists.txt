@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.26)
-project(better_bloom VERSION 2.8.0 LANGUAGES CXX)
+project(better_bloom VERSION 2.9.1 LANGUAGES CXX)
 
 set(DUSKLIGHT_DIR "" CACHE PATH "Dusklight source checkout, including extern/aurora")
 if(NOT EXISTS "${DUSKLIGHT_DIR}/sdk/CMakeLists.txt")

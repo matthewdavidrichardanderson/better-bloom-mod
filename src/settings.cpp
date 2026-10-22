@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <string_view>
 
 namespace bloom {
 namespace {
@@ -141,11 +142,13 @@ std::array options{
 
 static_assert(options.size() == static_cast<size_t>(Setting::Count));
 struct Preset {
+    int64_t id;
     const char* name;
     std::array<double, static_cast<size_t>(Setting::Count)> values;
+    const char* tint = "";
 };
 
-enum class PresetKind { Faithful, ModernVibrant, ModernMuted, Hybrid, Haze };
+enum class PresetKind { Faithful, FaithfulCold, Modern, ModernCold, Hybrid, Haze };
 
 auto preset_values(PresetKind kind) {
     std::array<double, static_cast<size_t>(Setting::Count)> result{};
@@ -155,17 +158,25 @@ auto preset_values(PresetKind kind) {
     const auto set = [&](Setting setting, double value) {
         result[static_cast<size_t>(setting)] = value;
     };
-    const bool faithful = kind == PresetKind::Faithful || kind == PresetKind::Hybrid;
+    const bool faithful = kind == PresetKind::Faithful || kind == PresetKind::FaithfulCold ||
+                          kind == PresetKind::Hybrid;
     if (!faithful) {
         set(Setting::Intensity, 129);
         set(Setting::Size, 50);
         set(Setting::Softness, 47);
         set(Setting::Diffusion, 29);
         set(Setting::ResponseGain, 40);
-        set(Setting::SceneStrength, kind == PresetKind::ModernMuted ? 80 : 0);
         set(Setting::SceneDarkening, 0);
+        if (kind == PresetKind::ModernCold) {
+            set(Setting::Intensity, 100);
+            set(Setting::Softness, 50);
+            set(Setting::ResponseGain, 50);
+            set(Setting::TintSource, 1);
+            set(Setting::SceneDarkening, 100);
+            set(Setting::PulseEnabled, 0);
+        }
         if (kind == PresetKind::Haze) {
-            set(Setting::Intensity, 140);
+            set(Setting::Intensity, 135);
             set(Setting::Size, 100);
             set(Setting::Softness, 70);
             set(Setting::Diffusion, 45);
@@ -174,11 +185,10 @@ auto preset_values(PresetKind kind) {
             set(Setting::InnerContribution, 40);
             set(Setting::OuterWidth, 150);
             set(Setting::HaloWidth, 220);
-            set(Setting::HaloContribution, 220);
-            set(Setting::HighlightRolloff, 140);
+            set(Setting::HaloContribution, 100);
+            set(Setting::HighlightRolloff, 120);
             set(Setting::HighlightLimit, 130);
             set(Setting::Saturation, 85);
-            set(Setting::SceneStrength, 80);
             set(Setting::PulseEnabled, 0);
         }
     } else {
@@ -194,9 +204,11 @@ auto preset_values(PresetKind kind) {
         set(Setting::HighlightRolloff, 176);
         set(Setting::HighlightLimit, 95);
         set(Setting::HighlightColour, 100);
+        if (kind == PresetKind::FaithfulCold) {
+            set(Setting::TintSource, 1);
+        }
         if (kind == PresetKind::Hybrid) {
             set(Setting::Intensity, 680);
-            set(Setting::SceneStrength, 50);
             set(Setting::OuterWidth, 200);
             set(Setting::OuterContribution, 20);
             set(Setting::HaloContribution, 8);
@@ -213,17 +225,51 @@ auto preset_values(PresetKind kind) {
     return result;
 }
 
-const std::array presets{Preset{"Faithful", preset_values(PresetKind::Faithful)},
-    Preset{"Modern (Vibrant)", preset_values(PresetKind::ModernVibrant)},
-    Preset{"Modern (Muted)", preset_values(PresetKind::ModernMuted)},
-    Preset{"Hybrid", preset_values(PresetKind::Hybrid)},
-    Preset{"Haze", preset_values(PresetKind::Haze)}};
+const std::array presets{Preset{1, "Faithful", preset_values(PresetKind::Faithful)},
+    Preset{7, "Faithful (Cold)", preset_values(PresetKind::FaithfulCold), "847770"},
+    Preset{3, "Modern", preset_values(PresetKind::Modern)},
+    Preset{6, "Modern (Cold)", preset_values(PresetKind::ModernCold), "fff4e8"},
+    Preset{4, "Hybrid", preset_values(PresetKind::Hybrid)},
+    Preset{5, "Haze", preset_values(PresetKind::Haze)}};
 ConfigVarHandle lastPresetHandle = 0;
 int64_t lastPreset = 0;
 bool applyingPreset = false;
 bool customTint = false;
 Settings current;
 std::array<float, 3> tint{1, 1, 1};
+
+const Preset* find_preset(int64_t id) {
+    if (id == 2) {
+        id = 3;
+    }
+    for (const auto& preset : presets) {
+        if (preset.id == id) {
+            return &preset;
+        }
+    }
+    return nullptr;
+}
+
+int64_t saved_preset(int64_t id) {
+    const auto* preset = find_preset(id);
+    return preset != nullptr ? preset->id : 0;
+}
+
+std::array<float, 3> decode_tint(std::string_view text) {
+    if (text.starts_with('#')) {
+        text.remove_prefix(1);
+    }
+    uint32_t rgb = 0;
+    if (text.size() == 6) {
+        const auto result = std::from_chars(text.data(), text.data() + text.size(), rgb, 16);
+        if (result.ec == std::errc{} && result.ptr == text.data() + text.size()) {
+            return {static_cast<float>((rgb >> 16) & 255u) / 255.0f,
+                static_cast<float>((rgb >> 8) & 255u) / 255.0f,
+                static_cast<float>(rgb & 255u) / 255.0f};
+        }
+    }
+    return {1, 1, 1};
+}
 
 double value(Setting setting) {
     return options[static_cast<size_t>(setting)].value;
@@ -238,10 +284,10 @@ bool preset_option(Setting setting) {
 }
 
 int64_t matching_preset() {
-    if (customTint) {
-        return 0;
-    }
     for (size_t p = 0; p < presets.size(); ++p) {
+        if (customTint != (presets[p].tint[0] != '\0') || tint != decode_tint(presets[p].tint)) {
+            continue;
+        }
         bool matches = true;
         for (size_t i = 0; i < options.size(); ++i) {
             if (preset_option(static_cast<Setting>(i)) && options[i].kind != UI_CONTROL_COLOR &&
@@ -304,21 +350,7 @@ void rebuild() {
 
 void parse_tint(const char* text, size_t length) {
     customTint = text != nullptr && length != 0;
-    tint = {1, 1, 1};
-    if (text == nullptr) {
-        return;
-    }
-    if (length != 0 && text[0] == '#') {
-        ++text;
-        --length;
-    }
-    uint32_t rgb = 0;
-    const auto result = std::from_chars(text, text + length, rgb, 16);
-    if (length == 6 && result.ec == std::errc{} && result.ptr == text + length) {
-        tint = {static_cast<float>((rgb >> 16) & 255u) / 255.0f,
-            static_cast<float>((rgb >> 8) & 255u) / 255.0f,
-            static_cast<float>(rgb & 255u) / 255.0f};
-    }
+    tint = decode_tint(text != nullptr ? std::string_view(text, length) : std::string_view{});
 }
 
 void on_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* next, const ConfigVarValue*,
@@ -337,8 +369,8 @@ void on_changed(ModContext*, ConfigVarHandle, const ConfigVarValue* next, const 
     rebuild();
     if (!applyingPreset && lastPresetHandle != 0) {
         const auto matching = matching_preset();
-        if (matching != 0 && matching != lastPreset) {
-            svc_config->set_int(mod_ctx, lastPresetHandle, matching);
+        if (matching != 0 && presets[matching - 1].id != lastPreset) {
+            svc_config->set_int(mod_ctx, lastPresetHandle, presets[matching - 1].id);
         }
     }
 }
@@ -363,13 +395,11 @@ void restore_defaults(ModContext*, void*) {
 }
 
 void restore_profile(ModContext*, void*) {
+    const auto* preset = find_preset(lastPreset);
     for (auto& option : options) {
         if (option.section == Section::Profile) {
             const size_t index = static_cast<size_t>(&option - options.data());
-            const double reference =
-                lastPreset > 0 && lastPreset <= static_cast<int64_t>(presets.size()) ?
-                    presets[lastPreset - 1].values[index] :
-                    option.initial;
+            const double reference = preset != nullptr ? preset->values[index] : option.initial;
             svc_config->set_int(mod_ctx, option.handle, static_cast<int64_t>(reference));
         }
     }
@@ -486,7 +516,7 @@ void set_preset(ModContext*, void*, const UiControlValue* input) {
         const auto& option = options[i];
         const double next = preset.values[i];
         if (option.kind == UI_CONTROL_COLOR) {
-            svc_config->set_string(mod_ctx, option.handle, "");
+            svc_config->set_string(mod_ctx, option.handle, preset.tint);
         } else if (option.kind == UI_CONTROL_TOGGLE) {
             svc_config->set_bool(mod_ctx, option.handle, next != 0);
         } else if (continuous(static_cast<Setting>(i))) {
@@ -495,14 +525,14 @@ void set_preset(ModContext*, void*, const UiControlValue* input) {
             svc_config->set_int(mod_ctx, option.handle, static_cast<int64_t>(next));
         }
     }
-    svc_config->set_int(mod_ctx, lastPresetHandle, input->int_value);
+    svc_config->set_int(mod_ctx, lastPresetHandle, preset.id);
     applyingPreset = false;
 }
 
 UiControlDesc describe_presets() {
     static const char* names[]{"Custom", presets[0].name, presets[1].name, presets[2].name,
-        presets[3].name, presets[4].name};
-    static constexpr bool selectable[]{false, true, true, true, true, true};
+        presets[3].name, presets[4].name, presets[5].name};
+    static constexpr bool selectable[]{false, true, true, true, true, true, true};
     UiControlDesc descriptor = UI_CONTROL_DESC_INIT;
     descriptor.kind = UI_CONTROL_DROPDOWN;
     descriptor.label = "Preset";
@@ -780,17 +810,22 @@ ModResult initialize_settings(ModError* error) {
     {
         return mods::set_error(error, MOD_ERROR, "Could not read the last bloom preset.");
     }
-    lastPreset = std::clamp(lastPreset, int64_t{0}, static_cast<int64_t>(presets.size()));
+    const int64_t normalizedPreset = saved_preset(lastPreset);
+    if (lastPreset != normalizedPreset &&
+        svc_config->set_int(mod_ctx, lastPresetHandle, normalizedPreset) != MOD_OK)
+    {
+        return mods::set_error(error, MOD_ERROR, "Could not update the saved bloom preset.");
+    }
+    lastPreset = normalizedPreset;
     const auto changed = [](ModContext*, ConfigVarHandle, const ConfigVarValue* next,
-                             const ConfigVarValue*, void*) {
-        lastPreset = std::clamp(next->int_value, int64_t{0}, static_cast<int64_t>(presets.size()));
-    };
+                             const ConfigVarValue*,
+                             void*) { lastPreset = saved_preset(next->int_value); };
     if (svc_config->subscribe(mod_ctx, lastPresetHandle, changed, nullptr, nullptr) != MOD_OK) {
         return mods::set_error(error, MOD_ERROR, "Could not subscribe to the last bloom preset.");
     }
     const auto matching = matching_preset();
-    if (matching != 0 && matching != lastPreset &&
-        svc_config->set_int(mod_ctx, lastPresetHandle, matching) != MOD_OK)
+    if (matching != 0 && presets[matching - 1].id != lastPreset &&
+        svc_config->set_int(mod_ctx, lastPresetHandle, presets[matching - 1].id) != MOD_OK)
     {
         return mods::set_error(error, MOD_ERROR, "Could not identify the saved bloom preset.");
     }
