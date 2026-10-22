@@ -43,28 +43,12 @@ jobs:
           arch: x64
 
       - name: Set up build tools
-        run: python -m pip install --disable-pip-version-check cmake==3.31.8 ninja==1.12.1
-
-      - name: Configure
         run: >-
-          cmake -S . -B build -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DDUSKLIGHT_DIR="${{ github.workspace }}/host-sdk"
-          -DBETTER_BLOOM_TESTS=ON
-          -DBETTER_BLOOM_GPU_TESTS=OFF
+          python -m pip install --disable-pip-version-check --only-binary=:all:
+          cmake==3.31.10 ninja==1.13.0
 
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure --no-tests=error
-
-      - name: Stage package
-        run: |
-          New-Item -ItemType Directory -Path dist -Force | Out-Null
-          Copy-Item -LiteralPath build/mods/better_bloom.dusk -Destination 'dist/Better Bloom.dusk'
-          $packageHash = (Get-FileHash -LiteralPath 'dist/Better Bloom.dusk' -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$packageHash *Better Bloom.dusk" | Set-Content -LiteralPath 'dist/Better Bloom.dusk.sha256' -Encoding ascii
+      - name: Build and validate Windows package
+        run: ./.github/scripts/build-windows.ps1 -DusklightDir "${{ github.workspace }}/host-sdk"
 
       - name: Upload Windows package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
